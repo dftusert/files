@@ -1,0 +1,262 @@
+//@version=6
+indicator("Локальные экстремумы + BOS/ChoCH v6", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+// --- ВХОДНЫЕ ПАРАМЕТРЫ ---
+grp_detect = "Настройки поиска экстремумов"
+leftBars   = input.int(3, "Баров слева (Left Bars)", minval = 1, group = grp_detect)
+rightBars  = input.int(3, "Баров справа (Right Bars)", minval = 1, group = grp_detect)
+srcMode    = input.string("Тень свечи (High/Low)", "Привязка линий", options = ["Тень свечи (High/Low)", "Тело свечи (Open/Close)"], group = grp_detect)
+
+// --- СТИЛЬ ЛИНИЙ МАКСИМУМОВ ---
+grp_style_high = "Стиль линии максимумов (High)"
+highLineColor  = input.color(color.green, "Цвет", group = grp_style_high)
+highLineStyleStr = input.string("Сплошная", "Стиль", options = ["Сплошная", "Пунктирная", "Точечная"], group = grp_style_high)
+highLineWidth  = input.int(1, "Толщина", minval = 1, maxval = 4, group = grp_style_high)
+
+// --- СТИЛЬ ЛИНИЙ МИНИМУМОВ ---
+grp_style_low  = "Стиль линии минимумов (Low)"
+lowLineColor   = input.color(color.red, "Цвет", group = grp_style_low)
+lowLineStyleStr = input.string("Сплошная", "Стиль", options = ["Сплошная", "Пунктирная", "Точечная"], group = grp_style_low)
+lowLineWidth   = input.int(1, "Толщина", minval = 1, maxval = 4, group = grp_style_low)
+
+// --- ОБЩИЕ НАСТРОЙКИ ---
+grp_style  = "Общие настройки"
+lineMode   = input.string("Две линии (Max/Min)", "Режим линий", options = ["Две линии (Max/Min)", "Одна линия (Зигзаг)"], group = grp_style)
+labelSize  = input.string("small", "Размер подписи", options = ["tiny", "small", "normal", "large"], group = grp_style)
+showZones  = input.bool(false, "Показывать зоны тренда", group = grp_style)
+zoneOpacity= input.int(90, "Прозрачность зон", group = grp_style)
+
+// --- ПРОДОЛЖЕНИЕ ---
+grp_ext    = "Продолжение тренда"
+showExtrap = input.bool(true, "Показывать продолжение", group = grp_ext)
+extendLen  = input.int(30, "Длина продолжения", group = grp_ext)
+
+// --- ДЕЛЬТА ---
+grp_diff   = "Разница (Delta)"
+showPriceDiff = input.bool(false, "Показывать разницу цен", group = grp_diff)
+showTimeDiff  = input.bool(false, "Показывать разницу времени", group = grp_diff)
+
+// --- BOS / CHOCH ---
+grp_bos = "BOS / ChoCH (Структура рынка)"
+showBOS    = input.bool(true, "Показывать BOS", group = grp_bos)
+showChoCH  = input.bool(true, "Показывать ChoCH", group = grp_bos)
+bosUpColor = input.color(color.green, "Цвет BOS (Вверх)", group = grp_bos)
+bosDnColor = input.color(color.red, "Цвет BOS (Вниз)", group = grp_bos)
+chochColor = input.color(color.orange, "Цвет ChoCH", group = grp_bos)
+bosStyle   = input.string("Сплошная", "Стиль линий BOS/ChoCH", options = ["Сплошная", "Пунктирная", "Точечная"], group = grp_bos)
+bosWidth   = input.int(2, "Толщина линий BOS/ChoCH", minval = 1, maxval = 4, group = grp_bos)
+
+// Конвертация стилей
+highLineStyle = highLineStyleStr == "Пунктирная" ? line.style_dashed : highLineStyleStr == "Точечная" ? line.style_dotted : line.style_solid
+lowLineStyle  = lowLineStyleStr == "Пунктирная" ? line.style_dashed : lowLineStyleStr == "Точечная" ? line.style_dotted : line.style_solid
+bosLineStyle  = bosStyle == "Пунктирная" ? line.style_dashed : bosStyle == "Точечная" ? line.style_dotted : line.style_solid
+
+// Источник данных
+useBody = srcMode == "Тело свечи (Open/Close)"
+srcHigh = useBody ? math.max(open, close) : high
+srcLow  = useBody ? math.min(open, close) : low
+
+// --- ПОИСК ПИВОТОВ ---
+ph = ta.pivothigh(srcHigh, leftBars, rightBars)
+pl = ta.pivotlow(srcLow, leftBars, rightBars)
+
+// --- ПЕРЕМЕННЫЕ ЭКСТРЕМУМОВ ---
+var int   lastHighX = na
+var float lastHighY = na
+var int   prevHighX = na
+var float prevHighY = na
+var int   lastHighTime = na
+var label lastHighLabel = na
+var string lastHighTooltip = ""
+
+var int   lastLowX  = na
+var float lastLowY  = na
+var int   prevLowX  = na
+var float prevLowY  = na
+var int   lastLowTime = na
+var label lastLowLabel = na
+var string lastLowTooltip = ""
+
+var line rtHighLine  = na
+var line rtLowLine   = na
+var line extHighLine = na
+var line extLowLine  = na
+
+var int   lastPivotX = na
+var float lastPivotY = na
+var int   lastPivotType = 0
+var line rtZigzagLine = na
+
+// --- ПЕРЕМЕННЫЕ СТРУКТУРЫ (BOS/CHOCH) ---
+var int   trendDir = 0 
+var float swingHighPrice = na
+var float swingLowPrice  = na
+var int   swingHighBar = na
+var int   swingLowBar  = na
+var bool  highBroken = false 
+var bool  lowBroken  = false  
+
+// Вспомогательная функция для дельты
+get_delta_text(float pDiff, int tDiff) =>
+    string res = ""
+    if showPriceDiff
+        res := str.tostring(pDiff, format.mintick)
+    if showPriceDiff and showTimeDiff
+        res := res + ", "
+    if showTimeDiff
+        res := res + str.tostring(tDiff) + " мин."
+    res
+
+// ==========================================
+// 1. ЛОГИКА СТРУКТУРЫ РЫНКА (BOS / CHOCH)
+// ==========================================
+if not na(swingHighPrice) and not highBroken and close > swingHighPrice
+    if trendDir == 1 and showBOS
+        line.new(x1=swingHighBar, y1=swingHighPrice, x2=bar_index, y2=swingHighPrice, color=bosUpColor, style=bosLineStyle, width=bosWidth)
+    if trendDir != 1 and showChoCH
+        line.new(x1=swingHighBar, y1=swingHighPrice, x2=bar_index, y2=swingHighPrice, color=chochColor, style=bosLineStyle, width=bosWidth)
+    trendDir := 1
+    highBroken := true 
+
+if not na(swingLowPrice) and not lowBroken and close < swingLowPrice
+    if trendDir == -1 and showBOS
+        line.new(x1=swingLowBar, y1=swingLowPrice, x2=bar_index, y2=swingLowPrice, color=bosDnColor, style=bosLineStyle, width=bosWidth)
+    if trendDir != -1 and showChoCH
+        line.new(x1=swingLowBar, y1=swingLowPrice, x2=bar_index, y2=swingLowPrice, color=chochColor, style=bosLineStyle, width=bosWidth)
+    trendDir := -1
+    lowBroken := true 
+
+if not na(ph)
+    swingHighPrice := ph
+    swingHighBar := bar_index - rightBars
+    highBroken := false 
+
+if not na(pl)
+    swingLowPrice := pl
+    swingLowBar := bar_index - rightBars
+    lowBroken := false 
+
+// ==========================================
+// 2. ОБРАБОТКА МАКСИМУМОВ
+// ==========================================
+if not na(ph)
+    int px = bar_index - rightBars
+    int currentTime = time[rightBars]
+    
+    string currentTooltip = ""
+    if showPriceDiff or showTimeDiff
+        if not na(lastHighY)
+            float pDiff = ph - lastHighY
+            int tDiff = math.round((currentTime - lastHighTime) / 60000)
+            currentTooltip := "Пред. " + get_delta_text(pDiff, tDiff)
+            if not na(lastHighLabel)
+                string nextText = "След. " + get_delta_text(pDiff, tDiff)
+                label.set_tooltip(lastHighLabel, str.length(lastHighTooltip) > 0 ? lastHighTooltip + "\n" + nextText : nextText)
+
+    if not na(lastHighY)
+        if lineMode == "Две линии (Max/Min)"
+            line.new(x1=lastHighX, y1=lastHighY, x2=px, y2=ph, color=highLineColor, style=highLineStyle, width=highLineWidth)
+        if lineMode == "Одна линия (Зигзаг)"
+            if lastPivotType != 1 and not na(lastPivotY)
+                line.new(x1=lastPivotX, y1=lastPivotY, x2=px, y2=ph, color=highLineColor, style=highLineStyle, width=highLineWidth)
+            lastPivotX := px
+            lastPivotY := ph
+            lastPivotType := 1
+        prevHighX := lastHighX
+        prevHighY := lastHighY
+    
+    label newHighLbl = label.new(x=px, y=ph, text=str.tostring(ph, format.mintick), style=label.style_label_down, color=highLineColor, textcolor=color.white, size=labelSize, tooltip=currentTooltip)
+    lastHighLabel := newHighLbl
+    lastHighTooltip := currentTooltip
+    lastHighTime := currentTime
+    lastHighX := px
+    lastHighY := ph
+
+// ==========================================
+// 3. ОБРАБОТКА МИНИМУМОВ
+// ==========================================
+if not na(pl)
+    int px = bar_index - rightBars
+    int currentTime = time[rightBars]
+    
+    string currentTooltip = ""
+    if showPriceDiff or showTimeDiff
+        if not na(lastLowY)
+            float pDiff = pl - lastLowY
+            int tDiff = math.round((currentTime - lastLowTime) / 60000)
+            currentTooltip := "Пред. " + get_delta_text(pDiff, tDiff)
+            if not na(lastLowLabel)
+                string nextText = "След. " + get_delta_text(pDiff, tDiff)
+                label.set_tooltip(lastLowLabel, str.length(lastLowTooltip) > 0 ? lastLowTooltip + "\n" + nextText : nextText)
+
+    if not na(lastLowY)
+        if lineMode == "Две линии (Max/Min)"
+            line.new(x1=lastLowX, y1=lastLowY, x2=px, y2=pl, color=lowLineColor, style=lowLineStyle, width=lowLineWidth)
+        if lineMode == "Одна линия (Зигзаг)"
+            if lastPivotType != -1 and not na(lastPivotY)
+                line.new(x1=lastPivotX, y1=lastPivotY, x2=px, y2=pl, color=lowLineColor, style=lowLineStyle, width=lowLineWidth)
+            lastPivotX := px
+            lastPivotY := pl
+            lastPivotType := -1
+        prevLowX := lastLowX
+        prevLowY := lastLowY
+    
+    label newLowLbl = label.new(x=px, y=pl, text=str.tostring(pl, format.mintick), style=label.style_label_up, color=lowLineColor, textcolor=color.white, size=labelSize, tooltip=currentTooltip)
+    lastLowLabel := newLowLbl
+    lastLowTooltip := currentTooltip
+    lastLowTime := currentTime
+    lastLowX := px
+    lastLowY := pl
+
+// ==========================================
+// 4. РЕАЛЬНОЕ ВРЕМЯ (ПРИНУДИТЕЛЬНАЯ ПРИВЯЗКА К ТЕКУЩЕЙ СВЕЧЕ)
+// ==========================================
+if barstate.islast
+    // Удаляем старые линии, чтобы создать новые с точной привязкой к текущему бару
+    if not na(rtHighLine)
+        line.delete(rtHighLine)
+        rtHighLine := na
+    if not na(rtLowLine)
+        line.delete(rtLowLine)
+        rtLowLine := na
+    if not na(rtZigzagLine)
+        line.delete(rtZigzagLine)
+        rtZigzagLine := na
+
+    // Создаем новые линии
+    if lineMode == "Две линии (Max/Min)"
+        if not na(lastHighY)
+            rtHighLine := line.new(x1=lastHighX, y1=lastHighY, x2=bar_index, y2=srcHigh, color=highLineColor, style=highLineStyle, width=highLineWidth)
+        if not na(lastLowY)
+            rtLowLine := line.new(x1=lastLowX, y1=lastLowY, x2=bar_index, y2=srcLow, color=lowLineColor, style=lowLineStyle, width=lowLineWidth)
+    
+    if lineMode == "Одна линия (Зигзаг)" and not na(lastPivotY)
+        float currentPrice = lastPivotType == 1 ? srcLow : srcHigh
+        color rtColor = lastPivotType == 1 ? highLineColor : lowLineColor
+        string rtStyle = lastPivotType == 1 ? highLineStyle : lowLineStyle
+        int rtWidth = lastPivotType == 1 ? highLineWidth : lowLineWidth
+        rtZigzagLine := line.new(x1=lastPivotX, y1=lastPivotY, x2=bar_index, y2=currentPrice, color=rtColor, style=rtStyle, width=rtWidth)
+
+    // Линии продолжения (пунктир) также обновляем
+    if showExtrap
+        if not na(extHighLine)
+            line.delete(extHighLine)
+            extHighLine := na
+        if not na(extLowLine)
+            line.delete(extLowLine)
+            extLowLine := na
+            
+        if not na(lastHighY) and not na(prevHighY) and lastHighX > prevHighX
+            float slopeH = (lastHighY - prevHighY) / (lastHighX - prevHighX)
+            int targetX = bar_index + extendLen
+            float targetY = lastHighY + slopeH * (targetX - lastHighX)
+            extHighLine := line.new(x1=lastHighX, y1=lastHighY, x2=targetX, y2=targetY, color=highLineColor, style=line.style_dashed, width=highLineWidth)
+            
+        if not na(lastLowY) and not na(prevLowY) and lastLowX > prevLowX
+            float slopeL = (lastLowY - prevLowY) / (lastLowX - prevLowX)
+            int targetX = bar_index + extendLen
+            float targetY = lastLowY + slopeL * (targetX - lastLowX)
+            extLowLine := line.new(x1=lastLowX, y1=lastLowY, x2=targetX, y2=targetY, color=lowLineColor, style=line.style_dashed, width=lowLineWidth)
+
+bool trendUp = na(lastHighX) or na(lastLowX) ? false : lastLowX > lastHighX
+bgcolor(showZones ? (trendUp ? color.new(color.green, zoneOpacity) : color.new(color.red, zoneOpacity)) : color.new(color.green, 100))
