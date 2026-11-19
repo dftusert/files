@@ -1,5 +1,5 @@
 //@version=6
-indicator("Локальные экстремумы + BOS/ChoCH v6", overlay = true, max_lines_count = 500, max_labels_count = 500)
+indicator("Локальные экстремумы + BOS/ChoCH + Fib v6", overlay = true, max_lines_count = 500, max_labels_count = 500)
 
 // --- ВХОДНЫЕ ПАРАМЕТРЫ ---
 grp_detect = "Настройки поиска экстремумов"
@@ -26,7 +26,7 @@ labelSize  = input.string("small", "Размер подписи", options = ["ti
 showZones  = input.bool(false, "Показывать зоны тренда", group = grp_style)
 zoneOpacity= input.int(90, "Прозрачность зон", group = grp_style)
 
-// --- ПРОДОЛЖЕНИЕ ---
+// --- ПРОДОЛЖЕНИЕ ТРЕНДА ---
 grp_ext    = "Продолжение тренда"
 showExtrap = input.bool(true, "Показывать продолжение", group = grp_ext)
 extendLen  = input.int(30, "Длина продолжения", group = grp_ext)
@@ -45,6 +45,23 @@ bosDnColor = input.color(color.red, "Цвет BOS (Вниз)", group = grp_bos)
 chochColor = input.color(color.orange, "Цвет ChoCH", group = grp_bos)
 bosStyle   = input.string("Сплошная", "Стиль линий BOS/ChoCH", options = ["Сплошная", "Пунктирная", "Точечная"], group = grp_bos)
 bosWidth   = input.int(2, "Толщина линий BOS/ChoCH", minval = 1, maxval = 4, group = grp_bos)
+
+// --- ФИБОНАЧЧИ ---
+grp_fib = "Коррекция Фибоначчи"
+showFib = input.bool(false, "Показывать коррекцию Фибоначчи", group = grp_fib)
+fibUpdateMode = input.string("Реальное время", "Режим обновления", options = ["Реальное время", "Статично (Фиксация)", "Ручной (Настройки)"], group = grp_fib)
+fibRange = input.string("3 часа", "Диапазон поиска Max/Min", options = ["5 минут", "10 минут", "15 минут", "30 минут", "45 минут", "1 час", "3 часа", "6 часов", "12 часов", "24 часа"], group = grp_fib)
+
+// Настройки для ручного режима
+grp_fib_manual = "Ручная настройка Fib (если выбран режим 'Ручной')"
+manualHighPrice = input.price(0.0, "Цена Максимума", group = grp_fib_manual)
+manualHighOffset = input.int(50, "Смещение Макс. (баров назад)", group = grp_fib_manual)
+manualLowPrice = input.price(0.0, "Цена Минимума", group = grp_fib_manual)
+manualLowOffset = input.int(10, "Смещение Мин. (баров назад)", group = grp_fib_manual)
+
+fibColor = input.color(color.new(color.blue, 60), "Цвет линий Fib", group = grp_fib)
+fibTextColor = input.color(color.new(color.blue, 0), "Цвет текста Fib", group = grp_fib)
+fibWidth = input.int(1, "Толщина линий Fib", minval = 1, maxval = 3, group = grp_fib)
 
 // Конвертация стилей
 highLineStyle = highLineStyleStr == "Пунктирная" ? line.style_dashed : highLineStyleStr == "Точечная" ? line.style_dotted : line.style_solid
@@ -95,6 +112,10 @@ var int   swingHighBar = na
 var int   swingLowBar  = na
 var bool  highBroken = false 
 var bool  lowBroken  = false  
+
+// --- ПЕРЕМЕННЫЕ ФИБОНАЧЧИ ---
+var line[] fibLines = array.new_line()
+var label[] fibLabels = array.new_label()
 
 // Вспомогательная функция для дельты
 get_delta_text(float pDiff, int tDiff) =>
@@ -209,54 +230,164 @@ if not na(pl)
     lastLowY := pl
 
 // ==========================================
-// 4. РЕАЛЬНОЕ ВРЕМЯ (ПРИНУДИТЕЛЬНАЯ ПРИВЯЗКА К ТЕКУЩЕЙ СВЕЧЕ)
+// 4. РЕАЛЬНОЕ ВРЕМЯ (ПЛАВНОЕ ОБНОВЛЕНИЕ)
 // ==========================================
 if barstate.islast
-    // Удаляем старые линии, чтобы создать новые с точной привязкой к текущему бару
-    if not na(rtHighLine)
-        line.delete(rtHighLine)
-        rtHighLine := na
-    if not na(rtLowLine)
-        line.delete(rtLowLine)
-        rtLowLine := na
-    if not na(rtZigzagLine)
-        line.delete(rtZigzagLine)
-        rtZigzagLine := na
-
-    // Создаем новые линии
     if lineMode == "Две линии (Max/Min)"
         if not na(lastHighY)
-            rtHighLine := line.new(x1=lastHighX, y1=lastHighY, x2=bar_index, y2=srcHigh, color=highLineColor, style=highLineStyle, width=highLineWidth)
+            if na(rtHighLine)
+                rtHighLine := line.new(x1=lastHighX, y1=lastHighY, x2=bar_index, y2=srcHigh, color=highLineColor, style=highLineStyle, width=highLineWidth)
+            else
+                line.set_xy1(rtHighLine, lastHighX, lastHighY)
+                line.set_xy2(rtHighLine, bar_index, srcHigh)
+                line.set_color(rtHighLine, highLineColor)
+                line.set_style(rtHighLine, highLineStyle)
+                line.set_width(rtHighLine, highLineWidth)
+                
         if not na(lastLowY)
-            rtLowLine := line.new(x1=lastLowX, y1=lastLowY, x2=bar_index, y2=srcLow, color=lowLineColor, style=lowLineStyle, width=lowLineWidth)
+            if na(rtLowLine)
+                rtLowLine := line.new(x1=lastLowX, y1=lastLowY, x2=bar_index, y2=srcLow, color=lowLineColor, style=lowLineStyle, width=lowLineWidth)
+            else
+                line.set_xy1(rtLowLine, lastLowX, lastLowY)
+                line.set_xy2(rtLowLine, bar_index, srcLow)
+                line.set_color(rtLowLine, lowLineColor)
+                line.set_style(rtLowLine, lowLineStyle)
+                line.set_width(rtLowLine, lowLineWidth)
     
     if lineMode == "Одна линия (Зигзаг)" and not na(lastPivotY)
         float currentPrice = lastPivotType == 1 ? srcLow : srcHigh
         color rtColor = lastPivotType == 1 ? highLineColor : lowLineColor
         string rtStyle = lastPivotType == 1 ? highLineStyle : lowLineStyle
         int rtWidth = lastPivotType == 1 ? highLineWidth : lowLineWidth
-        rtZigzagLine := line.new(x1=lastPivotX, y1=lastPivotY, x2=bar_index, y2=currentPrice, color=rtColor, style=rtStyle, width=rtWidth)
+        if na(rtZigzagLine)
+            rtZigzagLine := line.new(x1=lastPivotX, y1=lastPivotY, x2=bar_index, y2=currentPrice, color=rtColor, style=rtStyle, width=rtWidth)
+        else
+            line.set_xy1(rtZigzagLine, lastPivotX, lastPivotY)
+            line.set_xy2(rtZigzagLine, bar_index, currentPrice)
+            line.set_color(rtZigzagLine, rtColor)
+            line.set_style(rtZigzagLine, rtStyle)
+            line.set_width(rtZigzagLine, rtWidth)
 
-    // Линии продолжения (пунктир) также обновляем
     if showExtrap
-        if not na(extHighLine)
-            line.delete(extHighLine)
-            extHighLine := na
-        if not na(extLowLine)
-            line.delete(extLowLine)
-            extLowLine := na
-            
         if not na(lastHighY) and not na(prevHighY) and lastHighX > prevHighX
             float slopeH = (lastHighY - prevHighY) / (lastHighX - prevHighX)
             int targetX = bar_index + extendLen
             float targetY = lastHighY + slopeH * (targetX - lastHighX)
-            extHighLine := line.new(x1=lastHighX, y1=lastHighY, x2=targetX, y2=targetY, color=highLineColor, style=line.style_dashed, width=highLineWidth)
-            
+            if na(extHighLine)
+                extHighLine := line.new(x1=lastHighX, y1=lastHighY, x2=targetX, y2=targetY, color=highLineColor, style=line.style_dashed, width=highLineWidth)
+            else
+                line.set_xy1(extHighLine, lastHighX, lastHighY)
+                line.set_xy2(extHighLine, targetX, targetY)
+                line.set_color(extHighLine, highLineColor)
+                line.set_width(extHighLine, highLineWidth)
+                
         if not na(lastLowY) and not na(prevLowY) and lastLowX > prevLowX
             float slopeL = (lastLowY - prevLowY) / (lastLowX - prevLowX)
             int targetX = bar_index + extendLen
             float targetY = lastLowY + slopeL * (targetX - lastLowX)
-            extLowLine := line.new(x1=lastLowX, y1=lastLowY, x2=targetX, y2=targetY, color=lowLineColor, style=line.style_dashed, width=lowLineWidth)
+            if na(extLowLine)
+                extLowLine := line.new(x1=lastLowX, y1=lastLowY, x2=targetX, y2=targetY, color=lowLineColor, style=line.style_dashed, width=lowLineWidth)
+            else
+                line.set_xy1(extLowLine, lastLowX, lastLowY)
+                line.set_xy2(extLowLine, targetX, targetY)
+                line.set_color(extLowLine, lowLineColor)
+                line.set_width(extLowLine, lowLineWidth)
 
+// ==========================================
+// 5. КОРРЕКЦИЯ ФИБОНАЧЧИ
+// ==========================================
+int durationMinutes = switch fibRange
+    "5 минут" => 5
+    "10 минут" => 10
+    "15 минут" => 15
+    "30 минут" => 30
+    "45 минут" => 45
+    "1 час" => 60
+    "3 часа" => 180
+    "6 часов" => 360
+    "12 часов" => 720
+    "24 часа" => 1440
+    => 1440
+
+int lookbackBars = math.max(math.round(durationMinutes / timeframe.multiplier), 1)
+
+float fibHigh = ta.highest(high, lookbackBars)
+float fibLow  = ta.lowest(low, lookbackBars)
+int highOffset = ta.highestbars(high, lookbackBars)
+int lowOffset  = ta.lowestbars(low, lookbackBars)
+
+var int   staticHighX = na
+var float staticHighY = na
+var int   staticLowX  = na
+var float staticLowY  = na
+var string lastFibRange = ""
+
+if barstate.islast and showFib and fibUpdateMode == "Статично (Фиксация)"
+    if na(staticHighX) or fibRange != lastFibRange
+        staticHighX := bar_index + highOffset
+        staticHighY := fibHigh
+        staticLowX  := bar_index + lowOffset
+        staticLowY  := fibLow
+        lastFibRange := fibRange
+
+if showFib and barstate.islast
+    if array.size(fibLines) > 0
+        for i = 0 to array.size(fibLines) - 1
+            line.delete(array.get(fibLines, i))
+        array.clear(fibLines)
+    if array.size(fibLabels) > 0
+        for i = 0 to array.size(fibLabels) - 1
+            label.delete(array.get(fibLabels, i))
+        array.clear(fibLabels)
+
+    if bar_index > lookbackBars or fibUpdateMode == "Ручной (Настройки)"
+        int startIndex = na
+        int endIndex   = na
+        float startPrice = na
+        float endPrice   = na
+
+        if fibUpdateMode == "Ручной (Настройки)"
+            // Ручной режим
+            int hIdx = bar_index - manualHighOffset
+            float hPrice = manualHighPrice == 0.0 ? high : manualHighPrice // Если 0, берем текущий high
+            int lIdx = bar_index - manualLowOffset
+            float lPrice = manualLowPrice == 0.0 ? low : manualLowPrice // Если 0, берем текущий low
+            
+            startIndex := math.min(hIdx, lIdx)
+            endIndex   := math.max(hIdx, lIdx)
+            startPrice := startIndex == hIdx ? hPrice : lPrice
+            endPrice   := endIndex == hIdx ? hPrice : lPrice
+        else if fibUpdateMode == "Статично (Фиксация)"
+            if not na(staticHighY) and not na(staticLowY)
+                startIndex := math.min(staticHighX, staticLowX)
+                endIndex   := math.max(staticHighX, staticLowX)
+                startPrice := startIndex == staticHighX ? staticHighY : staticLowY
+                endPrice   := endIndex == staticHighX ? staticHighY : staticLowY
+        else
+            int hIdx = bar_index + highOffset
+            int lIdx = bar_index + lowOffset
+            startIndex := math.min(hIdx, lIdx)
+            endIndex   := math.max(hIdx, lIdx)
+            startPrice := startIndex == hIdx ? fibHigh : fibLow
+            endPrice   := endIndex == hIdx ? fibHigh : fibLow
+
+        if not na(startIndex)
+            float diff = endPrice - startPrice
+            float[] fibLevels = array.from(0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0)
+            
+            for i = 0 to array.size(fibLevels) - 1
+                float level = array.get(fibLevels, i)
+                float price = startPrice + (diff * level)
+                
+                line l = line.new(x1=startIndex, y1=price, x2=bar_index + 10, y2=price, color=fibColor, style=line.style_solid, width=fibWidth, extend=extend.right)
+                array.push(fibLines, l)
+                
+                string labelText = str.tostring(level * 100, "#.##") + "% (" + str.tostring(price, format.mintick) + ")"
+                label lbl = label.new(x=bar_index + 10, y=price, text=labelText, style=label.style_label_left, color=color.new(color.white, 100), textcolor=fibTextColor, size=size.small)
+                array.push(fibLabels, lbl)
+
+// ==========================================
+// 6. ФОНОВЫЕ ЗОНЫ ТРЕНДА
+// ==========================================
 bool trendUp = na(lastHighX) or na(lastLowX) ? false : lastLowX > lastHighX
 bgcolor(showZones ? (trendUp ? color.new(color.green, zoneOpacity) : color.new(color.red, zoneOpacity)) : color.new(color.green, 100))
