@@ -9,12 +9,14 @@ srcMode    = input.string("Тень свечи (High/Low)", "Привязка л
 
 // --- СТИЛЬ ЛИНИЙ МАКСИМУМОВ ---
 grp_style_high = "Стиль линии максимумов (High)"
+showHighLine   = input.bool(true, "Показывать линию максимумов", group = grp_style_high)
 highLineColor  = input.color(color.green, "Цвет", group = grp_style_high)
 highLineStyleStr = input.string("Сплошная", "Стиль", options = ["Сплошная", "Пунктирная", "Точечная"], group = grp_style_high)
 highLineWidth  = input.int(1, "Толщина", minval = 1, maxval = 4, group = grp_style_high)
 
 // --- СТИЛЬ ЛИНИЙ МИНИМУМОВ ---
 grp_style_low  = "Стиль линии минимумов (Low)"
+showLowLine    = input.bool(true, "Показывать линию минимумов", group = grp_style_low)
 lowLineColor   = input.color(color.red, "Цвет", group = grp_style_low)
 lowLineStyleStr = input.string("Сплошная", "Стиль", options = ["Сплошная", "Пунктирная", "Точечная"], group = grp_style_low)
 lowLineWidth   = input.int(1, "Толщина", minval = 1, maxval = 4, group = grp_style_low)
@@ -22,6 +24,7 @@ lowLineWidth   = input.int(1, "Толщина", minval = 1, maxval = 4, group = 
 // --- ОБЩИЕ НАСТРОЙКИ ---
 grp_style  = "Общие настройки"
 lineMode   = input.string("Две линии (Max/Min)", "Режим линий", options = ["Две линии (Max/Min)", "Одна линия (Зигзаг)"], group = grp_style)
+showExtLabels = input.bool(true, "Показывать подписи цен", group = grp_style) // НОВАЯ НАСТРОЙКА
 labelSize  = input.string("small", "Размер подписи", options = ["tiny", "small", "normal", "large"], group = grp_style)
 showZones  = input.bool(false, "Показывать зоны тренда", group = grp_style)
 zoneOpacity= input.int(90, "Прозрачность зон", group = grp_style)
@@ -40,10 +43,13 @@ showTimeDiff  = input.bool(false, "Показывать разницу врем�
 grp_bos = "BOS / ChoCH (Структура рынка)"
 showBOS    = input.bool(true, "Показывать BOS", group = grp_bos)
 showChoCH  = input.bool(true, "Показывать ChoCH", group = grp_bos)
+bosSourceMode = input.string("По закрытию (Тело)", "Расчет пробоя и уровня", options = ["По закрытию (Тело)", "По теням (High/Low)"], group = grp_bos)
+showBosLabels = input.bool(true, "Показывать текст на линиях", group = grp_bos) 
+
 bosUpColor = input.color(color.green, "Цвет BOS (Вверх)", group = grp_bos)
 bosDnColor = input.color(color.red, "Цвет BOS (Вниз)", group = grp_bos)
 chochColor = input.color(color.orange, "Цвет ChoCH", group = grp_bos)
-bosStyle   = input.string("Сплошная", "Стиль линий BOS/ChoCH", options = ["Сплошная", "Пунктирная", "Точечная"], group = grp_bos)
+bosStyle   = input.string("Пунктирная", "Стиль линий BOS/ChoCH", options = ["Сплошная", "Пунктирная", "Точечная"], group = grp_bos)
 bosWidth   = input.int(2, "Толщина линий BOS/ChoCH", minval = 1, maxval = 4, group = grp_bos)
 
 // --- ФИБОНАЧЧИ ---
@@ -68,10 +74,14 @@ highLineStyle = highLineStyleStr == "Пунктирная" ? line.style_dashed :
 lowLineStyle  = lowLineStyleStr == "Пунктирная" ? line.style_dashed : lowLineStyleStr == "Точечная" ? line.style_dotted : line.style_solid
 bosLineStyle  = bosStyle == "Пунктирная" ? line.style_dashed : bosStyle == "Точечная" ? line.style_dotted : line.style_solid
 
-// Источник данных
+// Источник данных для зигзага
 useBody = srcMode == "Тело свечи (Open/Close)"
 srcHigh = useBody ? math.max(open, close) : high
 srcLow  = useBody ? math.min(open, close) : low
+
+// Источник данных для триггера BOS/ChoCH
+bosSrcHigh = bosSourceMode == "По теням (High/Low)" ? high : close
+bosSrcLow  = bosSourceMode == "По теням (High/Low)" ? low : close
 
 // --- ПОИСК ПИВОТОВ ---
 ph = ta.pivothigh(srcHigh, leftBars, rightBars)
@@ -131,29 +141,37 @@ get_delta_text(float pDiff, int tDiff) =>
 // ==========================================
 // 1. ЛОГИКА СТРУКТУРЫ РЫНКА (BOS / CHOCH)
 // ==========================================
-if not na(swingHighPrice) and not highBroken and close > swingHighPrice
+if not na(swingHighPrice) and not highBroken and bosSrcHigh > swingHighPrice
     if trendDir == 1 and showBOS
         line.new(x1=swingHighBar, y1=swingHighPrice, x2=bar_index, y2=swingHighPrice, color=bosUpColor, style=bosLineStyle, width=bosWidth)
+        if showBosLabels
+            label.new(x=math.round((swingHighBar + bar_index) / 2), y=swingHighPrice, text="BOS", style=label.style_label_center, color=color.new(bosUpColor, 20), textcolor=color.white, size=size.small)
     if trendDir != 1 and showChoCH
         line.new(x1=swingHighBar, y1=swingHighPrice, x2=bar_index, y2=swingHighPrice, color=chochColor, style=bosLineStyle, width=bosWidth)
+        if showBosLabels
+            label.new(x=math.round((swingHighBar + bar_index) / 2), y=swingHighPrice, text="ChoCH", style=label.style_label_center, color=color.new(chochColor, 20), textcolor=color.white, size=size.small)
     trendDir := 1
     highBroken := true 
 
-if not na(swingLowPrice) and not lowBroken and close < swingLowPrice
+if not na(swingLowPrice) and not lowBroken and bosSrcLow < swingLowPrice
     if trendDir == -1 and showBOS
         line.new(x1=swingLowBar, y1=swingLowPrice, x2=bar_index, y2=swingLowPrice, color=bosDnColor, style=bosLineStyle, width=bosWidth)
+        if showBosLabels
+            label.new(x=math.round((swingLowBar + bar_index) / 2), y=swingLowPrice, text="BOS", style=label.style_label_center, color=color.new(bosDnColor, 20), textcolor=color.white, size=size.small)
     if trendDir != -1 and showChoCH
         line.new(x1=swingLowBar, y1=swingLowPrice, x2=bar_index, y2=swingLowPrice, color=chochColor, style=bosLineStyle, width=bosWidth)
+        if showBosLabels
+            label.new(x=math.round((swingLowBar + bar_index) / 2), y=swingLowPrice, text="ChoCH", style=label.style_label_center, color=color.new(chochColor, 20), textcolor=color.white, size=size.small)
     trendDir := -1
     lowBroken := true 
 
 if not na(ph)
-    swingHighPrice := ph
+    swingHighPrice := bosSourceMode == "По теням (High/Low)" ? high[rightBars] : math.max(open[rightBars], close[rightBars])
     swingHighBar := bar_index - rightBars
     highBroken := false 
 
 if not na(pl)
-    swingLowPrice := pl
+    swingLowPrice := bosSourceMode == "По теням (High/Low)" ? low[rightBars] : math.min(open[rightBars], close[rightBars])
     swingLowBar := bar_index - rightBars
     lowBroken := false 
 
@@ -174,19 +192,25 @@ if not na(ph)
                 string nextText = "След. " + get_delta_text(pDiff, tDiff)
                 label.set_tooltip(lastHighLabel, str.length(lastHighTooltip) > 0 ? lastHighTooltip + "\n" + nextText : nextText)
 
-    if not na(lastHighY)
+    if not na(lastHighY) and showHighLine
         if lineMode == "Две линии (Max/Min)"
             line.new(x1=lastHighX, y1=lastHighY, x2=px, y2=ph, color=highLineColor, style=highLineStyle, width=highLineWidth)
         if lineMode == "Одна линия (Зигзаг)"
             if lastPivotType != 1 and not na(lastPivotY)
                 line.new(x1=lastPivotX, y1=lastPivotY, x2=px, y2=ph, color=highLineColor, style=highLineStyle, width=highLineWidth)
-            lastPivotX := px
-            lastPivotY := ph
-            lastPivotType := 1
         prevHighX := lastHighX
         prevHighY := lastHighY
     
-    label newHighLbl = label.new(x=px, y=ph, text=str.tostring(ph, format.mintick), style=label.style_label_down, color=highLineColor, textcolor=color.white, size=labelSize, tooltip=currentTooltip)
+    if lineMode == "Одна линия (Зигзаг)"
+        lastPivotX := px
+        lastPivotY := ph
+        lastPivotType := 1
+
+    // Проверяем флаг showExtLabels перед созданием подписи
+    label newHighLbl = na
+    if showExtLabels
+        newHighLbl := label.new(x=px, y=ph, text=str.tostring(ph, format.mintick), style=label.style_label_center, color=highLineColor, textcolor=color.white, size=labelSize, tooltip=currentTooltip)
+        
     lastHighLabel := newHighLbl
     lastHighTooltip := currentTooltip
     lastHighTime := currentTime
@@ -210,19 +234,25 @@ if not na(pl)
                 string nextText = "След. " + get_delta_text(pDiff, tDiff)
                 label.set_tooltip(lastLowLabel, str.length(lastLowTooltip) > 0 ? lastLowTooltip + "\n" + nextText : nextText)
 
-    if not na(lastLowY)
+    if not na(lastLowY) and showLowLine
         if lineMode == "Две линии (Max/Min)"
             line.new(x1=lastLowX, y1=lastLowY, x2=px, y2=pl, color=lowLineColor, style=lowLineStyle, width=lowLineWidth)
         if lineMode == "Одна линия (Зигзаг)"
             if lastPivotType != -1 and not na(lastPivotY)
                 line.new(x1=lastPivotX, y1=lastPivotY, x2=px, y2=pl, color=lowLineColor, style=lowLineStyle, width=lowLineWidth)
-            lastPivotX := px
-            lastPivotY := pl
-            lastPivotType := -1
         prevLowX := lastLowX
         prevLowY := lastLowY
-    
-    label newLowLbl = label.new(x=px, y=pl, text=str.tostring(pl, format.mintick), style=label.style_label_up, color=lowLineColor, textcolor=color.white, size=labelSize, tooltip=currentTooltip)
+        
+    if lineMode == "Одна линия (Зигзаг)"
+        lastPivotX := px
+        lastPivotY := pl
+        lastPivotType := -1
+
+    // Проверяем флаг showExtLabels перед созданием подписи
+    label newLowLbl = na
+    if showExtLabels
+        newLowLbl := label.new(x=px, y=pl, text=str.tostring(pl, format.mintick), style=label.style_label_center, color=lowLineColor, textcolor=color.white, size=labelSize, tooltip=currentTooltip)
+        
     lastLowLabel := newLowLbl
     lastLowTooltip := currentTooltip
     lastLowTime := currentTime
@@ -234,7 +264,7 @@ if not na(pl)
 // ==========================================
 if barstate.islast
     if lineMode == "Две линии (Max/Min)"
-        if not na(lastHighY)
+        if showHighLine and not na(lastHighY)
             if na(rtHighLine)
                 rtHighLine := line.new(x1=lastHighX, y1=lastHighY, x2=bar_index, y2=srcHigh, color=highLineColor, style=highLineStyle, width=highLineWidth)
             else
@@ -243,8 +273,11 @@ if barstate.islast
                 line.set_color(rtHighLine, highLineColor)
                 line.set_style(rtHighLine, highLineStyle)
                 line.set_width(rtHighLine, highLineWidth)
+        else if not showHighLine and not na(rtHighLine)
+            line.delete(rtHighLine)
+            rtHighLine := na
                 
-        if not na(lastLowY)
+        if showLowLine and not na(lastLowY)
             if na(rtLowLine)
                 rtLowLine := line.new(x1=lastLowX, y1=lastLowY, x2=bar_index, y2=srcLow, color=lowLineColor, style=lowLineStyle, width=lowLineWidth)
             else
@@ -253,23 +286,31 @@ if barstate.islast
                 line.set_color(rtLowLine, lowLineColor)
                 line.set_style(rtLowLine, lowLineStyle)
                 line.set_width(rtLowLine, lowLineWidth)
+        else if not showLowLine and not na(rtLowLine)
+            line.delete(rtLowLine)
+            rtLowLine := na
     
     if lineMode == "Одна линия (Зигзаг)" and not na(lastPivotY)
-        float currentPrice = lastPivotType == 1 ? srcLow : srcHigh
-        color rtColor = lastPivotType == 1 ? highLineColor : lowLineColor
-        string rtStyle = lastPivotType == 1 ? highLineStyle : lowLineStyle
-        int rtWidth = lastPivotType == 1 ? highLineWidth : lowLineWidth
-        if na(rtZigzagLine)
-            rtZigzagLine := line.new(x1=lastPivotX, y1=lastPivotY, x2=bar_index, y2=currentPrice, color=rtColor, style=rtStyle, width=rtWidth)
-        else
-            line.set_xy1(rtZigzagLine, lastPivotX, lastPivotY)
-            line.set_xy2(rtZigzagLine, bar_index, currentPrice)
-            line.set_color(rtZigzagLine, rtColor)
-            line.set_style(rtZigzagLine, rtStyle)
-            line.set_width(rtZigzagLine, rtWidth)
+        bool drawZigzag = (lastPivotType == 1 and showHighLine) or (lastPivotType == -1 and showLowLine)
+        if drawZigzag
+            float currentPrice = lastPivotType == 1 ? srcLow : srcHigh
+            color rtColor = lastPivotType == 1 ? highLineColor : lowLineColor
+            string rtStyle = lastPivotType == 1 ? highLineStyle : lowLineStyle
+            int rtWidth = lastPivotType == 1 ? highLineWidth : lowLineWidth
+            if na(rtZigzagLine)
+                rtZigzagLine := line.new(x1=lastPivotX, y1=lastPivotY, x2=bar_index, y2=currentPrice, color=rtColor, style=rtStyle, width=rtWidth)
+            else
+                line.set_xy1(rtZigzagLine, lastPivotX, lastPivotY)
+                line.set_xy2(rtZigzagLine, bar_index, currentPrice)
+                line.set_color(rtZigzagLine, rtColor)
+                line.set_style(rtZigzagLine, rtStyle)
+                line.set_width(rtZigzagLine, rtWidth)
+        else if not na(rtZigzagLine)
+            line.delete(rtZigzagLine)
+            rtZigzagLine := na
 
     if showExtrap
-        if not na(lastHighY) and not na(prevHighY) and lastHighX > prevHighX
+        if showHighLine and not na(lastHighY) and not na(prevHighY) and lastHighX > prevHighX
             float slopeH = (lastHighY - prevHighY) / (lastHighX - prevHighX)
             int targetX = bar_index + extendLen
             float targetY = lastHighY + slopeH * (targetX - lastHighX)
@@ -280,8 +321,11 @@ if barstate.islast
                 line.set_xy2(extHighLine, targetX, targetY)
                 line.set_color(extHighLine, highLineColor)
                 line.set_width(extHighLine, highLineWidth)
+        else if not showHighLine and not na(extHighLine)
+            line.delete(extHighLine)
+            extHighLine := na
                 
-        if not na(lastLowY) and not na(prevLowY) and lastLowX > prevLowX
+        if showLowLine and not na(lastLowY) and not na(prevLowY) and lastLowX > prevLowX
             float slopeL = (lastLowY - prevLowY) / (lastLowX - prevLowX)
             int targetX = bar_index + extendLen
             float targetY = lastLowY + slopeL * (targetX - lastLowX)
@@ -292,6 +336,9 @@ if barstate.islast
                 line.set_xy2(extLowLine, targetX, targetY)
                 line.set_color(extLowLine, lowLineColor)
                 line.set_width(extLowLine, lowLineWidth)
+        else if not showLowLine and not na(extLowLine)
+            line.delete(extLowLine)
+            extLowLine := na
 
 // ==========================================
 // 5. КОРРЕКЦИЯ ФИБОНАЧЧИ
@@ -347,11 +394,10 @@ if showFib and barstate.islast
         float endPrice   = na
 
         if fibUpdateMode == "Ручной (Настройки)"
-            // Ручной режим
             int hIdx = bar_index - manualHighOffset
-            float hPrice = manualHighPrice == 0.0 ? high : manualHighPrice // Если 0, берем текущий high
+            float hPrice = manualHighPrice == 0.0 ? high : manualHighPrice 
             int lIdx = bar_index - manualLowOffset
-            float lPrice = manualLowPrice == 0.0 ? low : manualLowPrice // Если 0, берем текущий low
+            float lPrice = manualLowPrice == 0.0 ? low : manualLowPrice 
             
             startIndex := math.min(hIdx, lIdx)
             endIndex   := math.max(hIdx, lIdx)
