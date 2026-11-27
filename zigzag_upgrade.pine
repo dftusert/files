@@ -30,11 +30,12 @@ showExtLabels = input.bool(true, "Показывать подписи цен", g
 labelSize  = input.string("small", "Размер подписи", options = ["tiny", "small", "normal", "large"], group = grp_style)
 showZones  = input.bool(false, "Показывать зоны тренда", group = grp_style)
 zoneOpacity= input.int(90, "Прозрачность зон", minval = 0, maxval = 100, group = grp_style)
+zoneSource = input.string("Структура (BOS/ChoCH)", "Источник зон", options = ["Структура (BOS/ChoCH)", "Направление ноги"], group = grp_style)
 
 // --- Продолжение тренда ---
 grp_ext    = "Продолжение тренда"
 showExtrap = input.bool(true, "Показывать продолжение", group = grp_ext)
-extendLen  = input.int(30, "Длина продолжения", minval = 1, group = grp_ext)
+extendLen  = input.int(30, "Длина продолжения", minval = 1, maxval = 500, group = grp_ext)
 
 // --- Дельта ---
 grp_diff   = "Разница (Delta)"
@@ -45,7 +46,10 @@ showTimeDiff  = input.bool(false, "Показывать разницу врем�
 grp_bos = "BOS / ChoCH (Структура рынка)"
 showBOS    = input.bool(true, "Показывать BOS", group = grp_bos)
 showChoCH  = input.bool(true, "Показывать ChoCH", group = grp_bos)
-bosSourceMode = input.string("По закрытию (Тело)", "Расчет пробоя и уровня", options = ["По закрытию (Тело)", "По теням (High/Low)"], group = grp_bos)
+bosSourceMode = input.string("По закрытию (Тело)", "Расчет пробоя", options = ["По закрытию (Тело)", "По теням (High/Low)"], group = grp_bos)
+structMult = input.int(3, "Иерархия свинга для структуры (× left/right Bars)", minval = 1, maxval = 10, group = grp_bos)
+useDisp    = input.bool(true, "Фильтр импульса пробоя (тело бара)", group = grp_bos)
+dispMult   = input.float(0.5, "Мин. тело бара, × ATR(14)", minval = 0.0, step = 0.05, group = grp_bos)
 showBosLabels = input.bool(true, "Показывать текст на линиях", group = grp_bos)
 bosUpColor = input.color(color.green, "Цвет BOS (Вверх)", group = grp_bos)
 bosDnColor = input.color(color.red, "Цвет BOS (Вниз)", group = grp_bos)
@@ -57,6 +61,7 @@ bosWidth   = input.int(2, "Толщина линий BOS/ChoCH", minval = 1, max
 grp_fib = "Коррекция Фибоначчи"
 showFib = input.bool(false, "Показывать коррекцию Фибоначчи", group = grp_fib)
 fibUpdateMode = input.string("Реальное время", "Режим обновления", options = ["Реальное время", "Статично (Фиксация)", "Ручной (Настройки)"], group = grp_fib)
+fibSource = input.string("Диапазон (Max/Min за N баров)", "Источник Fib", options = ["Диапазон (Max/Min за N баров)", "Последняя нога зигзага"], group = grp_fib)
 fibRange = input.string("3 часа", "Диапазон поиска Max/Min", options = ["5 минут", "10 минут", "15 минут", "30 минут", "45 минут", "1 час", "3 часа", "6 часов", "12 часов", "24 часа"], group = grp_fib)
 
 grp_fib_manual = "Ручная настройка Fib (если выбран режим 'Ручной')"
@@ -70,48 +75,59 @@ fibTextColor = input.color(color.new(color.blue, 0), "Цвет текста Fib"
 fibWidth     = input.int(1, "Толщина линий Fib", minval = 1, maxval = 3, group = grp_fib)
 
 // ==========================================
-// СТИЛИ И ИСТОЧНИКИ
+// СТИЛИ И ИСТОЧНИКИ ДАННЫХ
 // ==========================================
 string highLineStyle = highLineStyleStr == "Пунктирная" ? line.style_dashed : highLineStyleStr == "Точечная" ? line.style_dotted : line.style_solid
 string lowLineStyle  = lowLineStyleStr  == "Пунктирная" ? line.style_dashed : lowLineStyleStr  == "Точечная" ? line.style_dotted : line.style_solid
 string bosLineStyle  = bosStyle == "Пунктирная" ? line.style_dashed : bosStyle == "Точечная" ? line.style_dotted : line.style_solid
 
-bool useBody  = srcMode == "Тело свечи (Open/Close)"
-float srcHigh = useBody ? math.max(open, close) : high
-float srcLow  = useBody ? math.min(open, close) : low
+bool  useBody  = srcMode == "Тело свечи (Open/Close)"
+float srcHigh  = useBody ? math.max(open, close) : high
+float srcLow   = useBody ? math.min(open, close) : low
 
-bool bosUseWicks = bosSourceMode == "По теням (High/Low)"
-float bosSrcHigh = bosUseWicks ? high : close
-float bosSrcLow  = bosUseWicks ? low : close
+bool  bosUseWicks = bosSourceMode == "По теням (High/Low)"
+float bosSrcHigh  = bosUseWicks ? high : close
+float bosSrcLow   = bosUseWicks ? low : close
 
-// --- пивоты ---
+// --- пивоты зигзага ---
 float ph = ta.pivothigh(srcHigh, leftBars, rightBars)
 float pl = ta.pivotlow(srcLow, leftBars, rightBars)
 
-// экстремумы внутри окна подтверждения (нужны для «живой» ноги)
-float winHH = ta.highest(srcHigh, rightBars + 1)
+// экстремумы внутри окна подтверждения (для «живой» ноги)
+float winHH  = ta.highest(srcHigh, rightBars + 1)
 int   winHHo = ta.highestbars(srcHigh, rightBars + 1)
-float winLL = ta.lowest(srcLow, rightBars + 1)
+float winLL  = ta.lowest(srcLow, rightBars + 1)
 int   winLLo = ta.lowestbars(srcLow, rightBars + 1)
+
+// --- пивоты структуры (всегда по теням, своя иерархия) ---
+int   structLeft  = leftBars * structMult
+int   structRight = rightBars * structMult
+float phS = ta.pivothigh(high, structLeft, structRight)
+float plS = ta.pivotlow(low, structLeft, structRight)
+
+// --- фильтр импульса ---
+float atrVal  = ta.atr(14)
+float barBody = math.abs(close - open)
+bool  dispOk  = not useDisp or (not na(atrVal) and barBody >= dispMult * atrVal)
 
 // ==========================================
 // СОСТОЯНИЕ
 // ==========================================
 // --- режим «Две линии» ---
-var int   lastHighX = na
-var float lastHighY = na
-var int   prevHighX = na
-var float prevHighY = na
-var int   lastHighTime = na
-var label lastHighLabel = na
+var int    lastHighX = na
+var float  lastHighY = na
+var int    prevHighX = na
+var float  prevHighY = na
+var int    lastHighTime = na
+var label  lastHighLabel = na
 var string lastHighTooltip = ""
 
-var int   lastLowX = na
-var float lastLowY = na
-var int   prevLowX = na
-var float prevLowY = na
-var int   lastLowTime = na
-var label lastLowLabel = na
+var int    lastLowX = na
+var float  lastLowY = na
+var int    prevLowX = na
+var float  prevLowY = na
+var int    lastLowTime = na
+var label  lastLowLabel = na
 var string lastLowTooltip = ""
 
 var line rtHighLine  = na
@@ -119,18 +135,18 @@ var line rtLowLine   = na
 var line extHighLine = na
 var line extLowLine  = na
 
-// --- зигзаг: вершины A (предыдущая) и B (последняя) ---
+// --- вершины зигзага A (предыдущая) и B (последняя) ---
 var int    vAX = na
 var float  vAY = na
 var int    vBX = na
 var float  vBY = na
-var int    vBT = 0          // 1 = максимум, -1 = минимум
+var int    vBT = 0
 var int    vBTime = na
 var string vBTooltip = ""
-var line   vSegLine = na    // отрезок A→B
-var label  vBLabel = na     // подпись вершины B
+var line   vSegLine = na
+var label  vBLabel = na
 
-// --- живая (незакрытая) нога и продолжение ---
+// --- живая нога и продолжение ---
 var float legY = na
 var int   legX = na
 var line  legLine = na
@@ -148,7 +164,26 @@ var bool  lowBroken  = false
 // --- фибоначчи ---
 var array<line>  fibLines  = array.new<line>()
 var array<label> fibLabels = array.new<label>()
+var array<float> fibLevels = array.from(0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0)
+var float fibCStartP = na
+var float fibCEndP   = na
+var int   fibCStartX = na
+var int   fibCEndX   = na
+var int   sLegAX = na
+var float sLegAY = na
+var int   sLegBX = na
+var float sLegBY = na
 
+// --- флаги алертов ---
+bool alertBosUp     = false
+bool alertBosDn     = false
+bool alertChoch     = false
+bool alertHighVert  = false
+bool alertLowVert   = false
+
+// ==========================================
+// ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ДЕЛЬТЫ
+// ==========================================
 get_delta_text(float pDiff, int tDiff) =>
     string res = ""
     if showPriceDiff
@@ -162,8 +197,15 @@ get_delta_text(float pDiff, int tDiff) =>
 // ==========================================
 // 1. СТРУКТУРА РЫНКА (BOS / CHOCH)
 // ==========================================
-if not na(swingHighPrice) and not na(swingHighBar) and not highBroken and bosSrcHigh > swingHighPrice
-    bool isBos    = trendDir == 1
+// сигналы считаем только по закрытому бару — внутрибарного «защёлкивания» больше нет
+bool confirmed = barstate.isconfirmed
+
+if confirmed and not na(swingHighPrice) and not na(swingHighBar) and not highBroken and bosSrcHigh > swingHighPrice and dispOk
+    bool isBos = trendDir == 1
+    if isBos
+        alertBosUp := true
+    else if trendDir != 0
+        alertChoch := true
     bool needDraw = isBos ? showBOS : (trendDir != 0 and showChoCH)
     if needDraw
         color lnCol = isBos ? bosUpColor : chochColor
@@ -174,8 +216,12 @@ if not na(swingHighPrice) and not na(swingHighBar) and not highBroken and bosSrc
     trendDir   := 1
     highBroken := true
 
-if not na(swingLowPrice) and not na(swingLowBar) and not lowBroken and bosSrcLow < swingLowPrice
-    bool isBos    = trendDir == -1
+if confirmed and not na(swingLowPrice) and not na(swingLowBar) and not lowBroken and bosSrcLow < swingLowPrice and dispOk
+    bool isBos = trendDir == -1
+    if isBos
+        alertBosDn := true
+    else if trendDir != 0
+        alertChoch := true
     bool needDraw = isBos ? showBOS : (trendDir != 0 and showChoCH)
     if needDraw
         color lnCol = isBos ? bosDnColor : chochColor
@@ -186,26 +232,88 @@ if not na(swingLowPrice) and not na(swingLowBar) and not lowBroken and bosSrcLow
     trendDir  := -1
     lowBroken := true
 
-if not na(ph)
-    swingHighPrice := ph
-    swingHighBar   := bar_index - rightBars
+// уровни структуры — цены пивотов, посчитанных по теням
+if not na(phS)
+    swingHighPrice := phS
+    swingHighBar   := bar_index - structRight
     highBroken     := false
 
-if not na(pl)
-    swingLowPrice := pl
-    swingLowBar   := bar_index - rightBars
+if not na(plS)
+    swingLowPrice := plS
+    swingLowBar   := bar_index - structRight
     lowBroken     := false
 
 // ==========================================
-// 2. МАКСИМУМЫ
+// 2. МАКСИМУМЫ (вершины зигзага + режим двух линий)
 // ==========================================
 if not na(ph)
     int   px    = bar_index - rightBars
     int   pTime = time[rightBars]
     float pY    = ph
+    bool  zz    = lineMode == "Одна линия (Зигзаг)"
 
-    if lineMode == "Две линии (Max/Min)"
-        // ---------- режим двух линий ----------
+    // ---- вершины зигзага: считаются в любом режиме (нужны и для Fib) ----
+    bool first   = na(vBX)
+    bool sameBar = not first and vBX == px
+    bool same    = not first and vBT == 1
+    bool better  = same and pY > vBY
+    bool replace = same and better
+    bool accept  = not sameBar and (first or not same or better)
+
+    if accept
+        string tt = ""
+        if zz and (showPriceDiff or showTimeDiff) and not first and not replace
+            float pDiff = pY - vBY
+            int   tDiff = int(math.round((pTime - vBTime) / 60000.0))
+            tt := "Пред. " + get_delta_text(pDiff, tDiff)
+            if not na(vBLabel)
+                string nextText = "След. " + get_delta_text(pDiff, tDiff)
+                label.set_tooltip(vBLabel, str.length(vBTooltip) > 0 ? vBTooltip + "\n" + nextText : nextText)
+
+        if replace
+            // однотипная, но более экстремальная вершина: переносим B и перерисовываем ногу
+            if not na(vSegLine)
+                line.delete(vSegLine)
+                vSegLine := na
+            if not na(vBLabel)
+                label.delete(vBLabel)
+                vBLabel := na
+            vBX := px
+            vBY := pY
+            vBTime    := pTime
+            vBTooltip := tt
+            if zz and showHighLine and not na(vAX)
+                vSegLine := line.new(x1=vAX, y1=vAY, x2=vBX, y2=vBY, color=highLineColor, style=highLineStyle, width=highLineWidth)
+        else
+            if not first
+                if zz and showHighLine
+                    vSegLine := line.new(x1=vBX, y1=vBY, x2=px, y2=pY, color=highLineColor, style=highLineStyle, width=highLineWidth)
+                else
+                    vSegLine := na
+                vAX := vBX
+                vAY := vBY
+            vBX := px
+            vBY := pY
+            vBT := 1
+            vBTime    := pTime
+            vBTooltip := tt
+            alertHighVert := true
+
+        if zz and showExtLabels
+            vBLabel := label.new(x=vBX, y=vBY, text=str.tostring(vBY, format.mintick), style=label.style_label_center, color=highLineColor, textcolor=color.white, size=labelSize, tooltip=tt)
+
+        // перезапуск живой ноги от новой вершины
+        legY := vBY
+        legX := vBX
+        if not na(winLL) and winLL < legY
+            legY := winLL
+            legX := bar_index + nz(winLLo)
+        if not na(legLine)
+            line.delete(legLine)
+            legLine := na
+
+    // ---- режим двух линий ----
+    if not zz
         string tt2 = ""
         if showPriceDiff or showTimeDiff
             if not na(lastHighY)
@@ -228,64 +336,6 @@ if not na(ph)
         if not na(rtHighLine)
             line.delete(rtHighLine)
             rtHighLine := na
-    else
-        // ---------- зигзаг ----------
-        bool first   = na(vBX)
-        bool same    = not first and vBT == 1
-        bool better  = same and pY > vBY
-        bool replace = same and better
-        bool accept  = first or not same or better
-
-        if accept
-            string tt = ""
-            if (showPriceDiff or showTimeDiff) and not first and not replace
-                float pDiff = pY - vBY
-                int   tDiff = int(math.round((pTime - vBTime) / 60000.0))
-                tt := "Пред. " + get_delta_text(pDiff, tDiff)
-                if not na(vBLabel)
-                    string nextText = "След. " + get_delta_text(pDiff, tDiff)
-                    label.set_tooltip(vBLabel, str.length(vBTooltip) > 0 ? vBTooltip + "\n" + nextText : nextText)
-
-            if replace
-                // вершина того же типа и экстремальнее — переносим B и перерисовываем последнюю ногу
-                if not na(vSegLine)
-                    line.delete(vSegLine)
-                    vSegLine := na
-                if not na(vBLabel)
-                    label.delete(vBLabel)
-                    vBLabel := na
-                vBX := px
-                vBY := pY
-                vBTime    := pTime
-                vBTooltip := tt
-                if showHighLine and not na(vAX)
-                    vSegLine := line.new(x1=vAX, y1=vAY, x2=vBX, y2=vBY, color=highLineColor, style=highLineStyle, width=highLineWidth)
-            else
-                if not first
-                    if showHighLine
-                        vSegLine := line.new(x1=vBX, y1=vBY, x2=px, y2=pY, color=highLineColor, style=highLineStyle, width=highLineWidth)
-                    else
-                        vSegLine := na
-                    vAX := vBX
-                    vAY := vBY
-                vBX := px
-                vBY := pY
-                vBT := 1
-                vBTime    := pTime
-                vBTooltip := tt
-
-            if showExtLabels
-                vBLabel := label.new(x=vBX, y=vBY, text=str.tostring(vBY, format.mintick), style=label.style_label_center, color=highLineColor, textcolor=color.white, size=labelSize, tooltip=tt)
-
-            // перезапуск живой ноги от новой вершины
-            legY := vBY
-            legX := vBX
-            if not na(winLL) and winLL < legY
-                legY := winLL
-                legX := bar_index + nz(winLLo)
-            if not na(legLine)
-                line.delete(legLine)
-                legLine := na
 
 // ==========================================
 // 3. МИНИМУМЫ
@@ -294,8 +344,66 @@ if not na(pl)
     int   px    = bar_index - rightBars
     int   pTime = time[rightBars]
     float pY    = pl
+    bool  zz    = lineMode == "Одна линия (Зигзаг)"
 
-    if lineMode == "Две линии (Max/Min)"
+    bool first   = na(vBX)
+    bool sameBar = not first and vBX == px
+    bool same    = not first and vBT == -1
+    bool better  = same and pY < vBY
+    bool replace = same and better
+    bool accept  = not sameBar and (first or not same or better)
+
+    if accept
+        string tt = ""
+        if zz and (showPriceDiff or showTimeDiff) and not first and not replace
+            float pDiff = pY - vBY
+            int   tDiff = int(math.round((pTime - vBTime) / 60000.0))
+            tt := "Пред. " + get_delta_text(pDiff, tDiff)
+            if not na(vBLabel)
+                string nextText = "След. " + get_delta_text(pDiff, tDiff)
+                label.set_tooltip(vBLabel, str.length(vBTooltip) > 0 ? vBTooltip + "\n" + nextText : nextText)
+
+        if replace
+            if not na(vSegLine)
+                line.delete(vSegLine)
+                vSegLine := na
+            if not na(vBLabel)
+                label.delete(vBLabel)
+                vBLabel := na
+            vBX := px
+            vBY := pY
+            vBTime    := pTime
+            vBTooltip := tt
+            if zz and showLowLine and not na(vAX)
+                vSegLine := line.new(x1=vAX, y1=vAY, x2=vBX, y2=vBY, color=lowLineColor, style=lowLineStyle, width=lowLineWidth)
+        else
+            if not first
+                if zz and showLowLine
+                    vSegLine := line.new(x1=vBX, y1=vBY, x2=px, y2=pY, color=lowLineColor, style=lowLineStyle, width=lowLineWidth)
+                else
+                    vSegLine := na
+                vAX := vBX
+                vAY := vBY
+            vBX := px
+            vBY := pY
+            vBT := -1
+            vBTime    := pTime
+            vBTooltip := tt
+            alertLowVert := true
+
+        if zz and showExtLabels
+            vBLabel := label.new(x=vBX, y=vBY, text=str.tostring(vBY, format.mintick), style=label.style_label_center, color=lowLineColor, textcolor=color.white, size=labelSize, tooltip=tt)
+
+        legY := vBY
+        legX := vBX
+        if not na(winHH) and winHH > legY
+            legY := winHH
+            legX := bar_index + nz(winHHo)
+        if not na(legLine)
+            line.delete(legLine)
+            legLine := na
+
+    if not zz
         string tt2 = ""
         if showPriceDiff or showTimeDiff
             if not na(lastLowY)
@@ -318,61 +426,6 @@ if not na(pl)
         if not na(rtLowLine)
             line.delete(rtLowLine)
             rtLowLine := na
-    else
-        bool first   = na(vBX)
-        bool same    = not first and vBT == -1
-        bool better  = same and pY < vBY
-        bool replace = same and better
-        bool accept  = first or not same or better
-
-        if accept
-            string tt = ""
-            if (showPriceDiff or showTimeDiff) and not first and not replace
-                float pDiff = pY - vBY
-                int   tDiff = int(math.round((pTime - vBTime) / 60000.0))
-                tt := "Пред. " + get_delta_text(pDiff, tDiff)
-                if not na(vBLabel)
-                    string nextText = "След. " + get_delta_text(pDiff, tDiff)
-                    label.set_tooltip(vBLabel, str.length(vBTooltip) > 0 ? vBTooltip + "\n" + nextText : nextText)
-
-            if replace
-                if not na(vSegLine)
-                    line.delete(vSegLine)
-                    vSegLine := na
-                if not na(vBLabel)
-                    label.delete(vBLabel)
-                    vBLabel := na
-                vBX := px
-                vBY := pY
-                vBTime    := pTime
-                vBTooltip := tt
-                if showLowLine and not na(vAX)
-                    vSegLine := line.new(x1=vAX, y1=vAY, x2=vBX, y2=vBY, color=lowLineColor, style=lowLineStyle, width=lowLineWidth)
-            else
-                if not first
-                    if showLowLine
-                        vSegLine := line.new(x1=vBX, y1=vBY, x2=px, y2=pY, color=lowLineColor, style=lowLineStyle, width=lowLineWidth)
-                    else
-                        vSegLine := na
-                    vAX := vBX
-                    vAY := vBY
-                vBX := px
-                vBY := pY
-                vBT := -1
-                vBTime    := pTime
-                vBTooltip := tt
-
-            if showExtLabels
-                vBLabel := label.new(x=vBX, y=vBY, text=str.tostring(vBY, format.mintick), style=label.style_label_center, color=lowLineColor, textcolor=color.white, size=labelSize, tooltip=tt)
-
-            legY := vBY
-            legX := vBX
-            if not na(winHH) and winHH > legY
-                legY := winHH
-                legX := bar_index + nz(winHHo)
-            if not na(legLine)
-                line.delete(legLine)
-                legLine := na
 
 // ==========================================
 // 4. ЖИВАЯ НОГА: ЭКСТРЕМУМ ПОСЛЕ ПОСЛЕДНЕЙ ВЕРШИНЫ
@@ -418,7 +471,6 @@ if barstate.islast
             line.delete(rtLowLine)
             rtLowLine := na
     else
-        // живая нога зигзага: цвет по направлению (вверх — зелёный, вниз — красный)
         bool canLeg = not na(vBY) and not na(legY) and not na(legX) and legX > vBX
         if canLeg
             bool upLeg = vBT == -1
@@ -442,7 +494,7 @@ if barstate.islast
             line.delete(legLine)
             legLine := na
 
-    // продолжение тренда
+    // --- продолжение тренда ---
     if lineMode == "Две линии (Max/Min)"
         bool canExtHigh = showExtrap and showHighLine and not na(lastHighY) and not na(prevHighY) and not na(lastHighX) and not na(prevHighX) and lastHighX > prevHighX
         if canExtHigh
@@ -481,8 +533,8 @@ if barstate.islast
             float slopeZ  = (vBY - vAY) / (vBX - vAX)
             int   targetX = bar_index + extendLen
             float targetY = vBY + slopeZ * (targetX - vBX)
-            color  zc     = vBT == 1 ? highLineColor : lowLineColor
-            int    zw     = vBT == 1 ? highLineWidth : lowLineWidth
+            color zc      = vBT == 1 ? highLineColor : lowLineColor
+            int   zw      = vBT == 1 ? highLineWidth : lowLineWidth
             if na(extZLine)
                 extZLine := line.new(x1=vBX, y1=vBY, x2=targetX, y2=targetY, color=zc, style=line.style_dashed, width=zw)
             else
@@ -524,7 +576,7 @@ var int   staticLowX  = na
 var float staticLowY  = na
 var string lastFibRange = ""
 
-if barstate.islast and showFib and fibUpdateMode == "Статично (Фиксация)"
+if barstate.islast and showFib and fibUpdateMode == "Статично (Фиксация)" and fibSource == "Диапазон (Max/Min за N баров)"
     if na(staticHighX) or na(staticLowX) or fibRange != lastFibRange
         staticHighX  := bar_index + nz(highOffset)
         staticHighY  := fibRangeHigh
@@ -532,50 +584,84 @@ if barstate.islast and showFib and fibUpdateMode == "Статично (Фикс�
         staticLowY   := fibRangeLow
         lastFibRange := fibRange
 
+if barstate.islast and showFib and fibUpdateMode == "Статично (Фиксация)" and fibSource == "Последняя нога зигзага"
+    if na(sLegBX) and not na(vAX) and not na(vBX)
+        sLegAX := vAX
+        sLegAY := vAY
+        sLegBX := vBX
+        sLegBY := vBY
+
 if showFib and barstate.islast
-    if array.size(fibLines) > 0
-        for i = 0 to array.size(fibLines) - 1
-            line.delete(array.get(fibLines, i))
-        array.clear(fibLines)
-    if array.size(fibLabels) > 0
-        for i = 0 to array.size(fibLabels) - 1
-            label.delete(array.get(fibLabels, i))
-        array.clear(fibLabels)
+    int   startIndex = na
+    int   endIndex   = na
+    float startPrice = na
+    float endPrice   = na
+    bool  useLeg     = fibSource == "Последняя нога зигзага"
 
-    bool fibReady = fibUpdateMode == "Ручной (Настройки)" or bar_index >= lookbackBars
-    if fibReady
-        int   startIndex = na
-        int   endIndex   = na
-        float startPrice = na
-        float endPrice   = na
+    if fibUpdateMode == "Ручной (Настройки)"
+        int   hIdx   = math.max(bar_index - manualHighOffset, 0)
+        float hPrice = manualHighPrice > 0 ? manualHighPrice : fibRangeHigh
+        int   lIdx   = math.max(bar_index - manualLowOffset, 0)
+        float lPrice = manualLowPrice > 0 ? manualLowPrice : fibRangeLow
+        startIndex := math.min(hIdx, lIdx)
+        endIndex   := math.max(hIdx, lIdx)
+        startPrice := startIndex == hIdx ? hPrice : lPrice
+        endPrice   := endIndex   == hIdx ? hPrice : lPrice
+    else if useLeg and fibUpdateMode == "Статично (Фиксация)"
+        if not na(sLegAX) and not na(sLegBX)
+            startIndex := math.min(sLegAX, sLegBX)
+            endIndex   := math.max(sLegAX, sLegBX)
+            startPrice := sLegAX < sLegBX ? sLegAY : sLegBY
+            endPrice   := sLegAX < sLegBX ? sLegBY : sLegAY
+    else if useLeg
+        if not na(vAX) and not na(vBX)
+            startIndex := math.min(vAX, vBX)
+            endIndex   := math.max(vAX, vBX)
+            startPrice := vAX < vBX ? vAY : vBY
+            endPrice   := vAX < vBX ? vBY : vAY
+    else if fibUpdateMode == "Статично (Фиксация)"
+        if not na(staticHighX) and not na(staticLowX) and not na(staticHighY) and not na(staticLowY)
+            startIndex := math.min(staticHighX, staticLowX)
+            endIndex   := math.max(staticHighX, staticLowX)
+            startPrice := startIndex == staticHighX ? staticHighY : staticLowY
+            endPrice   := endIndex   == staticHighX ? staticHighY : staticLowY
+    else if bar_index >= lookbackBars
+        int hIdx = bar_index + nz(highOffset)
+        int lIdx = bar_index + nz(lowOffset)
+        startIndex := math.min(hIdx, lIdx)
+        endIndex   := math.max(hIdx, lIdx)
+        startPrice := startIndex == hIdx ? fibRangeHigh : fibRangeLow
+        endPrice   := endIndex   == hIdx ? fibRangeHigh : fibRangeLow
 
-        if fibUpdateMode == "Ручной (Настройки)"
-            int   hIdx   = math.max(bar_index - manualHighOffset, 0)
-            float hPrice = manualHighPrice > 0 ? manualHighPrice : fibRangeHigh
-            int   lIdx   = math.max(bar_index - manualLowOffset, 0)
-            float lPrice = manualLowPrice > 0 ? manualLowPrice : fibRangeLow
-            startIndex := math.min(hIdx, lIdx)
-            endIndex   := math.max(hIdx, lIdx)
-            startPrice := startIndex == hIdx ? hPrice : lPrice
-            endPrice   := endIndex   == hIdx ? hPrice : lPrice
-        else if fibUpdateMode == "Статично (Фиксация)"
-            if not na(staticHighX) and not na(staticLowX) and not na(staticHighY) and not na(staticLowY)
-                startIndex := math.min(staticHighX, staticLowX)
-                endIndex   := math.max(staticHighX, staticLowX)
-                startPrice := startIndex == staticHighX ? staticHighY : staticLowY
-                endPrice   := endIndex   == staticHighX ? staticHighY : staticLowY
-        else
-            int hIdx = bar_index + nz(highOffset)
-            int lIdx = bar_index + nz(lowOffset)
-            startIndex := math.min(hIdx, lIdx)
-            endIndex   := math.max(hIdx, lIdx)
-            startPrice := startIndex == hIdx ? fibRangeHigh : fibRangeLow
-            endPrice   := endIndex   == hIdx ? fibRangeHigh : fibRangeLow
+    bool fibValid = not na(startIndex) and not na(endIndex) and not na(startPrice) and not na(endPrice)
 
-        if not na(startIndex) and not na(endIndex) and not na(startPrice) and not na(endPrice)
+    if not fibValid
+        // нет данных — убираем старую сетку
+        if array.size(fibLines) > 0
+            for i = 0 to array.size(fibLines) - 1
+                line.delete(array.get(fibLines, i))
+            array.clear(fibLines)
+        if array.size(fibLabels) > 0
+            for i = 0 to array.size(fibLabels) - 1
+                label.delete(array.get(fibLabels, i))
+            array.clear(fibLabels)
+        fibCStartP := na
+        fibCEndP   := na
+        fibCStartX := na
+        fibCEndX   := na
+    else
+        bool needRedraw = na(fibCStartP) or fibCStartP != startPrice or fibCEndP != endPrice or fibCStartX != startIndex or fibCEndX != endIndex
+        if needRedraw
+            if array.size(fibLines) > 0
+                for i = 0 to array.size(fibLines) - 1
+                    line.delete(array.get(fibLines, i))
+                array.clear(fibLines)
+            if array.size(fibLabels) > 0
+                for i = 0 to array.size(fibLabels) - 1
+                    label.delete(array.get(fibLabels, i))
+                array.clear(fibLabels)
+
             float diff = endPrice - startPrice
-            array<float> fibLevels = array.from(0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0)
-
             for i = 0 to array.size(fibLevels) - 1
                 float level = array.get(fibLevels, i)
                 float price = startPrice + diff * level
@@ -587,11 +673,31 @@ if showFib and barstate.islast
                 label lvlLabel = label.new(x=bar_index + 10, y=price, text=lblText, style=label.style_label_left, color=color.new(color.white, 100), textcolor=fibTextColor, size=size.small)
                 array.push(fibLabels, lvlLabel)
 
+            fibCStartP := startPrice
+            fibCEndP   := endPrice
+            fibCStartX := startIndex
+            fibCEndX   := endIndex
+
 // ==========================================
 // 7. ФОНОВЫЕ ЗОНЫ ТРЕНДА
 // ==========================================
-bool  trendUp   = not na(lastHighX) and not na(lastLowX) and lastLowX > lastHighX
+// направление текущей ноги: -1 = вниз, 1 = вверх, 0 = данных ещё нет
+int legTrend = 0
+if vBT != 0
+    legTrend := vBT == 1 ? -1 : 1
+
+int zoneTrend = zoneSource == "Структура (BOS/ChoCH)" ? trendDir : legTrend
+
 color zoneColor = na
-if showZones
-    zoneColor := trendUp ? color.new(color.green, zoneOpacity) : color.new(color.red, zoneOpacity)
+if showZones and zoneTrend != 0
+    zoneColor := zoneTrend == 1 ? color.new(color.green, zoneOpacity) : color.new(color.red, zoneOpacity)
 bgcolor(zoneColor)
+
+// ==========================================
+// 8. АЛЕРТЫ
+// ==========================================
+alertcondition(alertBosUp,    "BOS вверх",        "BOS: пробой свингового максимума по тренду")
+alertcondition(alertBosDn,    "BOS вниз",         "BOS: пробой свингового минимума по тренду")
+alertcondition(alertChoch,    "ChoCH",            "ChoCH: смена направления структуры")
+alertcondition(alertHighVert, "Зигзаг: максимум", "Зигзаг: подтверждён новый максимум")
+alertcondition(alertLowVert,  "Зигзаг: минимум",  "Зигзаг: подтверждён новый минимум")
